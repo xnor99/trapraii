@@ -1,0 +1,17 @@
+[package]
+name = "trapraii"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+shell-words = "1"
+signal-hook = "0.4"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true

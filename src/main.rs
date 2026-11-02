@@ -27,20 +27,38 @@ impl InterruptState {
 }
 
 struct CliArgs {
+    magic_error_code: Option<u8>,
     command1: Vec<String>,
     command2: Vec<String>,
 }
 
 fn get_args() -> Option<CliArgs> {
-    let mut args = env::args().skip(1);
-    let command1_str = args.next()?;
-    let command2_str = args.next()?;
-    if args.count() != 0 {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+
+    if args.len() < 2 {
         return None;
     }
+
+    let options = args.get(..args.len() - 2)?;
+    let mut magic_error_code = None;
+    let command1_str = args.get(args.len() - 2)?;
+    let command2_str = args.last()?;
+    {
+        let mut i = 0;
+        while i < options.len() {
+            if options.get(i)? == "--magic-error-code" {
+                magic_error_code = Some(options.get(i + 1)?.parse().ok()?);
+                i += 1;
+            } else {
+                return None;
+            }
+            i += 1;
+        }
+    }
     Some(CliArgs {
-        command1: shell_words::split(&command1_str).ok()?,
-        command2: shell_words::split(&command2_str).ok()?,
+        magic_error_code,
+        command1: shell_words::split(command1_str).ok()?,
+        command2: shell_words::split(command2_str).ok()?,
     })
 }
 
@@ -96,11 +114,10 @@ impl<T> Drop for JoinOnDrop<T> {
 }
 
 fn main() -> ExitCode {
-    fn main_inner() -> Option<ExitCode> {
+    fn main_inner(args: CliArgs) -> Option<ExitCode> {
         let state = Arc::new(InterruptState::new());
         let (thread_handle, handle) = handle_signals(state.clone())?;
         let _handle = JoinOnDrop::new(thread_handle, handle);
-        let args = get_args()?;
         let first_command_exit_code = run_command(&args.command1)?;
         if first_command_exit_code != 0 {
             return Some(ExitCode::from(first_command_exit_code as u8));
@@ -118,9 +135,14 @@ fn main() -> ExitCode {
     }
 
     const MAGIC_ERROR_CODE: u8 = 42;
+    let Some(args) = get_args() else {
+        eprintln!("usage: trapraii [--magic-error-code val] command1 command2");
+        return MAGIC_ERROR_CODE.into();
+    };
+    let error_code = args.magic_error_code;
 
-    match main_inner() {
+    match main_inner(args) {
         Some(exit_code) => exit_code,
-        None => MAGIC_ERROR_CODE.into(),
+        None => error_code.unwrap_or(MAGIC_ERROR_CODE).into(),
     }
 }

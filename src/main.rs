@@ -12,6 +12,8 @@ use signal_hook::{
     iterator::{Handle, Signals},
 };
 
+/// Tracks whether a termination signal has been received.
+/// Allows the main thread to wait for a signal synchronously.
 struct InterruptState {
     interrupted: Mutex<bool>,
     cond_var: Condvar,
@@ -26,12 +28,16 @@ impl InterruptState {
     }
 }
 
+/// Parsed CLI arguments: optional magic exit code, plus two commands to run sequentially.
 struct CliArgs {
     magic_error_code: Option<u8>,
     command1: Vec<String>,
     command2: Vec<String>,
 }
 
+/// Parse CLI arguments. Expects: [--magic-error-code val] command1 command2.
+/// command1/command2 are space-separated strings parsed via shell_words.
+/// Returns None if parsing fails or not enough arguments are provided.
 fn get_args() -> Option<CliArgs> {
     let args = env::args().skip(1).collect::<Vec<_>>();
 
@@ -62,6 +68,9 @@ fn get_args() -> Option<CliArgs> {
     })
 }
 
+/// Set up a signal handler thread that flags InterruptState and unblocks
+/// the condvar when SIGHUP, SIGINT, or SIGTERM arrives.
+/// Returns the spawned thread handle and a Signals::Handle for later cleanup.
 fn handle_signals(state: Arc<InterruptState>) -> Option<(JoinHandle<()>, Handle)> {
     let mut signals = Signals::new([SIGHUP, SIGINT, SIGTERM]).ok()?;
     let handle = signals.handle();
@@ -78,6 +87,8 @@ fn handle_signals(state: Arc<InterruptState>) -> Option<(JoinHandle<()>, Handle)
     ))
 }
 
+/// Execute a command and return its exit code, or None if the program failed to start.
+/// Signal termination (e.g. killed by a signal) is reported as 128 + signal number.
 fn run_command<S: AsRef<OsStr>>(command: &[S]) -> Option<i32> {
     let program = command.first()?;
     let args = command.get(1..)?;
@@ -92,6 +103,8 @@ fn run_command<S: AsRef<OsStr>>(command: &[S]) -> Option<i32> {
         })
 }
 
+/// RAII wrapper that closes the signal handle and joins the thread on drop.
+/// Ensures the signal handler thread doesn't outlive the program.
 struct JoinOnDrop<T> {
     join_handle: Option<JoinHandle<T>>,
     signal_handle: Handle,
